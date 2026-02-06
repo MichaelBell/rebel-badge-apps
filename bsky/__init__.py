@@ -43,8 +43,8 @@ last_update_time = 0
 bloot_bounds =      rect( 5, 70, 310, 144)
 avatar_bounds =     rect( 5,  5,  60, 60)
 name_bounds =       rect(75, 35, 240, 25)
-like_bounds =       rect(48, 214, 30, 26)
-like_num_bounds =   rect(81, 214, 50, 21)
+like_bounds =       rect(47, 214, 30, 26)
+like_num_bounds =   rect(80, 214, 50, 21)
 repost_bounds =     rect(145, 214, 30, 26)
 repost_num_bounds = rect(178, 214, 50, 21)
 has_image_bounds =  rect(243, 214, 30, 26)
@@ -141,12 +141,12 @@ def has_image(bloot):
               'images' in bloot['post']['embed']['media']) or
              'images' in bloot['post']['embed']))
 
-def update_display(bloots):
+def update_display():
     screen.pen = color.black
     screen.clear()
     screen.pen = color.white
     
-    bloot = bloots[bloot_idx]
+    bloot = root_bloots[bloot_idx]
     
     display_user(bloot)
     
@@ -156,13 +156,13 @@ def update_display(bloots):
     
     if 'likeCount' in bloot['post']:
         if 'viewer' in bloot['post'] and 'like' in bloot['post']['viewer']:
-            screen.blit(icons.sprite(0, 1), like_bounds)
+            screen.blit(icons.sprite(0, 0), like_bounds)
         else:
             screen.blit(icons.sprite(0, 1), like_bounds)
         text.draw(screen, str(bloot['post']['likeCount']), like_num_bounds, size=16)
     if 'repostCount' in bloot['post']:
         if 'viewer' in bloot['post'] and 'repost' in bloot['post']['viewer']:
-            screen.blit(icons.sprite(1, 1), repost_bounds)
+            screen.blit(icons.sprite(1, 0), repost_bounds)
         else:
             screen.blit(icons.sprite(1, 1), repost_bounds)
         text.draw(screen, str(bloot['post']['repostCount']), repost_num_bounds, size=16)
@@ -170,69 +170,94 @@ def update_display(bloots):
         screen.blit(icons.sprite(2, 0), has_image_bounds)
     
 
+def fetch_bloots(cur_cid = None):
+    global session, bloot_idx, root_bloots
+    
+    bloot_idx = 0
+    num_bloots = 20
+    print("Fetch bloots...")
+    badge.set_caselights(1)
+    resp = session.getSkyline(num_bloots).json()
+    if 'error' in resp:
+        print(f"Session error: {resp['message']}")
+        session = Session(secrets.BSKY_USERNAME, secrets.BSKY_PASSWORD)
+        print("Fetching again...")
+        resp = session.getSkyline(num_bloots).json()
+    skyline = resp['feed']
+    print("  fetched.")
+    badge.set_caselights(0)
+    
+    root_bloots = []
+    bloot_cids = []
+    for bloot in skyline:
+        if 'record' not in bloot['post']: continue
+        if 'reply' in bloot['post']['record']: continue
+        if bloot['post']['cid'] in bloot_cids: continue
+        
+        if bloot['post']['cid'] == cur_cid:
+            bloot_idx = len(root_bloots)
+        
+        root_bloots.append(bloot)
+        bloot_cids.append(bloot['post']['cid'])
+            
+
 def display_skyline():
     global last_update_time, session, bloot_idx, root_bloots, bsky_state
     
-    fetch_bloots = time.time() - last_update_time >= UPDATE_INTERVAL
+    need_fetch = time.time() - last_update_time >= UPDATE_INTERVAL
     
-    display_update = fetch_bloots
+    need_display_update = need_fetch
     if badge.pressed(BUTTON_UP):
         if bloot_idx > 0: bloot_idx -= 1
-        else: fetch_bloots = True
-        display_update = True
+        else: need_fetch = True
+        need_display_update = True
     if badge.pressed(BUTTON_DOWN):
         bloot_idx += 1
-        display_update = True
-    if badge.pressed(BUTTON_C) and has_image(root_bloots[bloot_idx]):
+        need_display_update = True
+
+    # Disabled because tends to run out of RAM
+    if False and badge.pressed(BUTTON_C) and has_image(root_bloots[bloot_idx]):
         display_image(root_bloots[bloot_idx])
         bsky_state = BskyState.DisplayImage
-    
-    if fetch_bloots:
-        bloot_idx = 0
-        num_bloots = 20
-        print("Fetch bloots...")
-        badge.set_caselights(1)
-        resp = session.getSkyline(num_bloots).json()
-        if 'error' in resp:
-            print(f"Session error: {resp['message']}")
-            session = Session(secrets.BSKY_USERNAME, secrets.BSKY_PASSWORD)
-            print("Fetching again...")
-            resp = session.getSkyline(num_bloots).json()
-        skyline = resp['feed']
-        print("  fetched.")
-        badge.set_caselights(0)
         
-        root_bloots = []
-        bloot_cids = []
-        for bloot in skyline:
-            if 'record' not in bloot['post']: continue
-            if 'reply' in bloot['post']['record']: continue
-            if bloot['post']['cid'] in bloot_cids: continue
-            root_bloots.append(bloot)
-            bloot_cids.append(bloot['post']['cid'])
+    cid = None
+    if badge.pressed(BUTTON_A):
+        cid = root_bloots[bloot_idx]['post']['cid']
+        session.like(cid, root_bloots[bloot_idx]['post']['uri'])
+        need_fetch = True
+        need_display_update = True
+    if badge.pressed(BUTTON_B):
+        cid = root_bloots[bloot_idx]['post']['cid']
+        session.rebloot(cid, root_bloots[bloot_idx]['post']['uri'])
+        need_fetch = True
+        need_display_update = True
     
+    if need_fetch:
+        fetch_bloots(cid)
     
-    if display_update:
+    if need_display_update:
         bloot_idx = min(bloot_idx, len(root_bloots) - 1)
             
-        update_display(root_bloots)
+        update_display()
         last_update_time = time.time()
 
 
 def update():
-    global session, bsky_state
+    global session, bsky_state, last_update_time
 
     if bsky_state == BskyState.Running:
         display_skyline()
 
     elif bsky_state == BskyState.ConnectBsky:
         session = Session(secrets.BSKY_USERNAME, secrets.BSKY_PASSWORD)
+        fetch_bloots()
+        last_update_time = time.time()
+        bloot_idx = 0
         bsky_state = BskyState.Running
         badge.default_clear(None)
         badge.mode(HIRES)
         screen.antialias = image.X4
-        screen.pen = color.black
-        screen.clear()        
+        update_display()      
 
     elif bsky_state == BskyState.UpdateTime:
         user_message("Please Wait", ["Connecting to Bluesky..."])
@@ -247,7 +272,7 @@ def update():
     elif bsky_state == BskyState.DisplayImage:
         if badge.pressed(BUTTON_C):
             bsky_state = BskyState.Running
-            update_display(root_bloots)
+            update_display()
 
 
 # Standalone support for Thonny debugging

@@ -1,3 +1,28 @@
+# This is an adapted version of the lightweight atproto library
+# https://github.com/ianklatzco/atprototools
+#
+# MIT License
+#
+# Copyright (c) 2023 Ian Klatzco
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import requests
 import datetime
 
@@ -50,7 +75,7 @@ class Session():
             pass
                         
 
-    def rebloot(self, url):
+    def rebloot_url(self, url):
         """Rebloot a bloot given the URL."""
         # sample url from desktop
         # POST https://bsky.social/xrpc/com.atproto.repo.createRecord
@@ -75,7 +100,10 @@ class Session():
 
         # import pdb; pdb.set_trace()
         bloot_cid = self.getBlootByUrl(url).json().get('thread').get('post').get('cid')
+        
+        rebloot(self, "{}".format(bloot_cid), "at://{}/app.bsky.feed.post/{}".format(person_youre_reblooting, url_identifier))
 
+    def rebloot(self, cid, uri):
         # subject -> uri is the maia one (thing rt'ing, scx)
         timestamp = datetime.datetime.now(datetime.timezone.utc)
         timestamp = timestamp.isoformat().replace('+00:00', 'Z')
@@ -87,11 +115,39 @@ class Session():
             "repo": "{}".format(self.DID),
             "record": {
                 "subject": {
-                    "uri":"at://{}/app.bsky.feed.post/{}".format(person_youre_reblooting, url_identifier),
-                    "cid":"{}".format(bloot_cid) # cid of the bloot to rebloot
+                    "uri":uri,
+                    "cid":cid # cid of the bloot to rebloot
                 },
                 "createdAt": timestamp,
                 "$type": "app.bsky.feed.repost"
+            }
+        }
+
+        resp = requests.post(
+            self.ATP_HOST + "/xrpc/com.atproto.repo.createRecord",
+            json=data,
+            headers=headers
+        )
+
+        return resp
+
+    def like(self, cid, uri):
+        # subject -> uri is the maia one (thing rt'ing, scx)
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        timestamp = timestamp.isoformat().replace('+00:00', 'Z')
+
+        headers = {"Authorization": "Bearer " + self.ATP_AUTH_TOKEN}
+
+        data = {
+            "collection": "app.bsky.feed.like",
+            "repo": "{}".format(self.DID),
+            "record": {
+                "subject": {
+                    "uri":uri,
+                    "cid":cid # cid of the bloot to rebloot
+                },
+                "createdAt": timestamp,
+                "$type": "app.bsky.feed.like"
             }
         }
 
