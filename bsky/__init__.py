@@ -40,7 +40,7 @@ session = None
 UPDATE_INTERVAL = 60
 last_update_time = 0
 
-bloot_bounds =      rect( 5, 70, 310, 144)
+bloot_bounds =      rect( 5, 70, 310, 142)
 avatar_bounds =     rect( 5,  5,  60, 60)
 name_bounds =       rect(75, 35, 240, 25)
 like_bounds =       rect(47, 214, 30, 26)
@@ -49,7 +49,7 @@ repost_bounds =     rect(145, 214, 30, 26)
 repost_num_bounds = rect(178, 214, 50, 21)
 has_image_bounds =  rect(243, 214, 30, 26)
 
-image_bounds =      rect( 5, 70, 310, 190)
+image_bounds =      rect( 5, 68, 310, 170)
 
 # Low res until connected
 badge.mode(LORES)
@@ -58,31 +58,35 @@ screen.antialias = OFF
 bloot_idx = 0
 
 
-def display_png(uri, bounds, temp=False, fixed_scale=False):
-    if temp:
-        FILENAME = 'temp.png'
-    else:
+def display_uri(uri, bounds, temp=False, fixed_scale=False):
+    if not temp:
         FILENAME = uri.split('/')[-1]
-    PATHNAME = '/ramfs/' + FILENAME
-    
-    if FILENAME not in os.listdir('/ramfs'):
-        badge.set_caselights(1)
-        resp = requests.get(uri)
-        with open(PATHNAME, "wb") as f:
-            f.write(resp.content)
-    
-    png = image.load(PATHNAME)
+        PATHNAME = '/ramfs/' + FILENAME
+        
+        if FILENAME not in os.listdir('/ramfs'):
+            badge.set_caselights(1)
+            resp = requests.get(uri)
+            with open(PATHNAME, "wb") as f:
+                f.write(resp.content)
+        
+        img = image.load(PATHNAME)
+    else:
+        img = image.load(requests.get(uri).content)
     
     if fixed_scale:
         bounds_ratio = bounds.h / bounds.w
-        png_ratio = png.height / png.width
-        if png_ratio > bounds_ratio:
-            # png taller than required bounds
-            bounds.w = bounds.h * (bounds_ratio / png_ratio)
-        elif png_ratio < bounds_ratio:
-            bounds.h = bounds.w * (png_ratio / bounds_ratio)
+        img_ratio = img.height / img.width
+        print(bounds.h, bounds.w, bounds_ratio, img.height, img.width, img_ratio)
+        if img_ratio > bounds_ratio:
+            # img taller than required bounds
+            original_width = bounds.w
+            bounds.w = bounds.h * (1 / img_ratio)
+            bounds.x += (original_width - bounds.w) / 2
+        elif img_ratio < bounds_ratio:
+            bounds.h = bounds.w * img_ratio
+        print(bounds.h, bounds.w, bounds_ratio, img.height, img.width, img_ratio)
     
-    screen.blit(png, bounds)
+    screen.blit(img, bounds)
     badge.set_caselights(0)
     
 
@@ -94,7 +98,7 @@ def display_avatar(uri, bounds):
         return
     
     uri = uri.replace("img/avatar/plain", "img/avatar_thumbnail/plain")
-    display_png(uri, bounds)
+    display_uri(uri, bounds)
     
 def display_user(bloot):
     screen.font = font_bold
@@ -123,16 +127,16 @@ def display_image(bloot):
     screen.clear()
     screen.pen = color.white
     
-    if uri.endswith('@jpeg'):
-        uri = uri[:-4] + 'png'
+    if uri.endswith('@png'):
+        uri = uri[:-3] + 'jpeg'
     
-    if not uri.endswith("@png"):
+    if not uri.endswith("@jpeg"):
         print("Invalid image: " + uri)
         return
     
     display_user(bloot)
     
-    display_png(uri, image_bounds, True, True)
+    display_uri(uri, image_bounds, True, True)
 
 
 def has_image(bloot):
@@ -152,7 +156,7 @@ def update_display():
     
     bloot_text = bloot['post']['record']['text']
     screen.font = font_sans
-    text.draw(screen, clean_text(bloot_text), bloot_bounds, size=18)
+    text.draw(screen, clean_text(bloot_text), bloot_bounds, line_spacing=0.96, size=18)
     
     if 'likeCount' in bloot['post']:
         if 'viewer' in bloot['post'] and 'like' in bloot['post']['viewer']:
@@ -216,7 +220,7 @@ def display_skyline():
         need_display_update = True
 
     # Disabled because tends to run out of RAM
-    if False and badge.pressed(BUTTON_C) and has_image(root_bloots[bloot_idx]):
+    if badge.pressed(BUTTON_C) and has_image(root_bloots[bloot_idx]):
         display_image(root_bloots[bloot_idx])
         bsky_state = BskyState.DisplayImage
         

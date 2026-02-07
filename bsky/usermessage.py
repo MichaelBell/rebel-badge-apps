@@ -56,7 +56,7 @@ def user_message(header, lines):
 
     screen.font = small_font
     line_spacing = 8
-    ty = 20
+    ty = 23
 
     for line in lines:
         center_text(line, ty)
