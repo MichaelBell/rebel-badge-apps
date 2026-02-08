@@ -1,4 +1,5 @@
 APP_DIR = "/bsky"
+TMP_DIR = "/tmp/bsky/"
 
 import sys
 import os
@@ -18,14 +19,14 @@ icons = SpriteSheet("icons30b.png", 3, 2)
 # Standalone bootstrap for module imports
 sys.path.insert(0, APP_DIR)
 
-from ramfs import mkramfs
 from usermessage import user_message
 from text import clean_text
 
 from atprototools import Session
 
 
-mkramfs(1024 * 1024)
+if 'bsky' not in os.listdir('/tmp'):
+    os.mkdir('/tmp/bsky')
 
 class BskyState:
     Running = 0
@@ -40,7 +41,7 @@ session = None
 UPDATE_INTERVAL = 60
 last_update_time = 0
 
-bloot_bounds =      rect( 5, 70, 310, 142)
+bloot_bounds =      rect( 5, 68, 310, 146)
 avatar_bounds =     rect( 5,  5,  60, 60)
 name_bounds =       rect(75, 35, 240, 25)
 like_bounds =       rect(47, 214, 30, 26)
@@ -58,33 +59,54 @@ screen.antialias = OFF
 bloot_idx = 0
 
 
-def display_uri(uri, bounds, temp=False, fixed_scale=False):
+def get_tmp_free():
+    stat = os.statvfs('/tmp')
+    return stat[0] * stat[4]
+
+# Remove 10 least recently used files
+def clean_tmp():
+    files = []
+    for file in os.listdir('/tmp'):
+        files = (file, os.stat('/tmp/' + file)[7])
+    
+    files.sort(key=lambda f: f[1])
+    for f in files[:10]:
+        os.remove('/tmp/' + file)
+
+def display_uri(uri, bounds, temp=False, scale_to_height=False):
+    # Make a copy of bounds so we don't modify the incoming value
+    bounds = rect(bounds.x, bounds.y, bounds.w, bounds.h)
+    
+    target_height = bounds.h if scale_to_height else 0
+    
     if not temp:
         FILENAME = uri.split('/')[-1]
-        PATHNAME = '/ramfs/' + FILENAME
+        PATHNAME = TMP_DIR + FILENAME
         
-        if FILENAME not in os.listdir('/ramfs'):
+        if FILENAME not in os.listdir(TMP_DIR):
             badge.set_caselights(1)
+            
+            if get_tmp_free() < 100 * 1024:
+                print("Cleaning temp")
+                clean_tmp()
+            
             resp = requests.get(uri)
             with open(PATHNAME, "wb") as f:
                 f.write(resp.content)
         
-        img = image.load(PATHNAME)
+        img = image.load(PATHNAME, 0, target_height)
     else:
-        img = image.load(requests.get(uri).content)
+        badge.set_caselights(1)
+        img = image.load(requests.get(uri).content, 0, target_height)
     
-    if fixed_scale:
-        bounds_ratio = bounds.h / bounds.w
-        img_ratio = img.height / img.width
-        print(bounds.h, bounds.w, bounds_ratio, img.height, img.width, img_ratio)
-        if img_ratio > bounds_ratio:
-            # img taller than required bounds
-            original_width = bounds.w
-            bounds.w = bounds.h * (1 / img_ratio)
-            bounds.x += (original_width - bounds.w) / 2
-        elif img_ratio < bounds_ratio:
-            bounds.h = bounds.w * img_ratio
-        print(bounds.h, bounds.w, bounds_ratio, img.height, img.width, img_ratio)
+    if scale_to_height:
+        if bounds.w > img.width:
+            bounds.x += (bounds.w - img.width) / 2
+            bounds.w = img.width
+            print(bounds.h, bounds.w, img.height, img.width)
+        elif bounds.w < img.width:
+            bounds.h = img.height * (bounds.w / img.width)
+            print(bounds.h, bounds.w, img.height, img.width)
     
     screen.blit(img, bounds)
     badge.set_caselights(0)
@@ -146,17 +168,28 @@ def has_image(bloot):
              'images' in bloot['post']['embed']))
 
 def update_display():
+    global bloot_idx, last_update_time
+    
+    bloot_idx = min(bloot_idx, len(root_bloots) - 1)
+    
+    bloot = root_bloots[bloot_idx]
+    
+    last_update_time = time.time()
+    
+    bloot_text = clean_text(bloot['post']['record']['text'])
+    
+    if len(bloot_text) == 0 and has_image(bloot):
+        display_image(bloot)
+        return
+    
     screen.pen = color.black
     screen.clear()
     screen.pen = color.white
     
-    bloot = root_bloots[bloot_idx]
-    
     display_user(bloot)
     
-    bloot_text = bloot['post']['record']['text']
     screen.font = font_sans
-    text.draw(screen, clean_text(bloot_text), bloot_bounds, line_spacing=0.96, size=18)
+    text.draw(screen, bloot_text, bloot_bounds, size=18)
     
     if 'likeCount' in bloot['post']:
         if 'viewer' in bloot['post'] and 'like' in bloot['post']['viewer']:
@@ -178,7 +211,7 @@ def fetch_bloots(cur_cid = None):
     global session, bloot_idx, root_bloots
     
     bloot_idx = 0
-    num_bloots = 20
+    num_bloots = 25
     print("Fetch bloots...")
     badge.set_caselights(1)
     resp = session.getSkyline(num_bloots).json()
@@ -240,14 +273,11 @@ def display_skyline():
         fetch_bloots(cid)
     
     if need_display_update:
-        bloot_idx = min(bloot_idx, len(root_bloots) - 1)
-            
         update_display()
-        last_update_time = time.time()
 
 
 def update():
-    global session, bsky_state, last_update_time
+    global session, bsky_state, last_update_time, bloot_idx
 
     if bsky_state == BskyState.Running:
         display_skyline()
@@ -277,9 +307,17 @@ def update():
         if badge.pressed(BUTTON_C):
             bsky_state = BskyState.Running
             update_display()
+        if badge.pressed(BUTTON_UP):
+            if bloot_idx > 0: bloot_idx -= 1
+            bsky_state = BskyState.Running
+            update_display()
+        if badge.pressed(BUTTON_DOWN):
+            bloot_idx += 1
+            bsky_state = BskyState.Running
+            update_display()
 
 
 # Standalone support for Thonny debugging
-#if __name__ == "__main__":
-#    run(update)
+if __name__ == "__main__":
+    run(update)
 
